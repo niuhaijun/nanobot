@@ -10,11 +10,13 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/mcp/auditlogs"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/mcp/auditlogs"
 )
 
 var ErrNoResult = errors.New("no result in response")
+
+const HookMutationsMetaKey = "ai.nanobot.hooks/mutations"
 
 type MessageHandler interface {
 	OnMessage(ctx context.Context, msg Message)
@@ -60,11 +62,6 @@ type Session struct {
 
 	requestIDToProgressTokenLock sync.RWMutex
 	requestIDToProgressToken     map[any]map[any]struct{}
-}
-
-type worker struct {
-	ctx    context.Context
-	cancel context.CancelCauseFunc
 }
 
 type filterRegistration struct {
@@ -375,7 +372,7 @@ func (s *Session) copyInto(out, in any) bool {
 		return true
 	}
 
-	if dstVal.Type().Kind() == reflect.Ptr && srcVal.Type().AssignableTo(dstVal.Type().Elem()) {
+	if dstVal.Type().Kind() == reflect.Pointer && srcVal.Type().AssignableTo(dstVal.Type().Elem()) {
 		dstVal.Elem().Set(srcVal)
 		return true
 	}
@@ -522,15 +519,18 @@ func (s *Session) SendPayload(ctx context.Context, method string, payload any) e
 	if err != nil {
 		return fmt.Errorf("failed to marshal payload: %w", err)
 	}
-	return s.Send(ctx, Message{
+	return s.Send(ctx, &Message{
 		Method: method,
 		Params: data,
 	})
 }
 
-func (s *Session) Send(ctx context.Context, req Message) error {
+func (s *Session) Send(ctx context.Context, req *Message) error {
 	if s.wire == nil {
 		return fmt.Errorf("empty session: wire is not initialized")
+	}
+	if req == nil {
+		return fmt.Errorf("request is nil")
 	}
 
 	s.lock.Lock()
@@ -538,21 +538,21 @@ func (s *Session) Send(ctx context.Context, req Message) error {
 	s.lock.Unlock()
 
 	for _, filter := range f {
-		newReq, err := filter.filter(ctx, &req)
+		newReq, err := filter.filter(ctx, req)
 		if err != nil || newReq == nil {
 			return err
 		}
-		req = *newReq
+		*req = *newReq
 	}
 
-	newReq, err := s.callAllHooks(ctx, &req, "request")
+	newReq, err := s.callAllHooks(ctx, req, "request")
 	if err != nil {
 		return fmt.Errorf("failed to call \"request\" hooks: %w", err)
 	}
 
-	req = *newReq
+	*req = *newReq
 	req.JSONRPC = "2.0"
-	if err := s.wire.Send(ctx, req); err != nil {
+	if err := s.wire.Send(ctx, *req); err != nil {
 		return err
 	}
 	return nil
@@ -680,21 +680,34 @@ func (s *Session) callAllHooks(ctx context.Context, req *Message, direction stri
 	hookResponse, _ := InvokeHooks(ctx, s.HookRunner, hooks, &SessionMessageHook{
 		Accept:  true,
 		Message: req,
-	}, req.Method, params, func(hook HookMapping, hookResponse SessionMessageHook, err error) SessionMessageHook {
+	}, req.Method, params, func(hook HookMapping, target HookTarget, hookResponse SessionMessageHook, err error) SessionMessageHook {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed to run hook %s: %w", hook.Name, err))
 			return hookResponse
+		}
+
+		if hookResponse.Mutated && target.MutateDisallowed {
+			if hookResponse.Reason != "" {
+				hookResponse.Reason += "; "
+			}
+
+			hookResponse.Reason += "mutation not allowed by hook configuration, implicit rejection"
+			hookResponse.Accept = false
+			hookResponse.Mutated = false
 		}
 
 		if auditLog != nil {
 			status := "ok"
 			if !hookResponse.Accept {
 				status = "rejected"
+			} else if hookResponse.Mutated {
+				status = "mutated"
 			}
 			auditLog.WebhookStatuses = append(auditLog.WebhookStatuses, auditlogs.MCPWebhookStatus{
 				Type:    direction,
 				Method:  req.Method,
 				Name:    hook.Name,
+				Tool:    target.Target,
 				Status:  status,
 				Message: hookResponse.Reason,
 			})
@@ -705,10 +718,39 @@ func (s *Session) callAllHooks(ctx context.Context, req *Message, direction stri
 		}
 
 		// Use the hook response message if set, otherwise use the last value we have
-		if hookResponse.Message == nil {
-			hookResponse.Message = req
+		if hookResponse.Mutated && hookResponse.Message != nil {
+			if string(hookResponse.Message.Result) == "null" {
+				hookResponse.Message.Result = nil
+			}
+			if string(hookResponse.Message.Params) == "null" {
+				hookResponse.Message.Params = nil
+			}
+
+			if auditLog != nil {
+				switch direction {
+				case "request":
+					auditLog.MutatedRequestBody, _ = json.Marshal(hookResponse.Message)
+				case "response":
+					if auditLog.OriginalResponseBody == nil {
+						auditLog.OriginalResponseBody, _ = json.Marshal(req)
+					}
+				}
+			}
+
+			if req.HookMutations == nil {
+				req.HookMutations = make(map[string]HookMutation)
+			}
+			mutation := req.HookMutations[direction]
+			mutation.Mutated = true
+			if hookResponse.Reason != "" {
+				mutation.Reasons = append(mutation.Reasons, hookResponse.Reason)
+			}
+			req.HookMutations[direction] = mutation
+			hookResponse.Message.HookMutations = req.HookMutations
+
+			*req = *hookResponse.Message
 		} else {
-			req = hookResponse.Message
+			hookResponse.Message = req
 		}
 		return hookResponse
 	})
@@ -716,10 +758,36 @@ func (s *Session) callAllHooks(ctx context.Context, req *Message, direction stri
 	return hookResponse.Message, errors.Join(errs...)
 }
 
+func addHookMutationsMeta(resp *Message) error {
+	if len(resp.HookMutations) == 0 || len(resp.Result) == 0 {
+		return nil
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return fmt.Errorf("failed to unmarshal response result to add hook mutation metadata: %w", err)
+	}
+
+	meta, ok := result["_meta"].(map[string]any)
+	if !ok {
+		meta = make(map[string]any)
+	}
+	meta[HookMutationsMetaKey] = resp.HookMutations
+	result["_meta"] = meta
+
+	data, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("failed to marshal response result with hook mutation metadata: %w", err)
+	}
+	resp.Result = data
+	return nil
+}
+
 func (s *Session) Exchange(ctx context.Context, method string, in, out any, opts ...ExchangeOption) (err error) {
 	opt := complete.Complete(opts...)
 	var (
 		req        *Message
+		resp       Message
 		respResult json.RawMessage
 		respError  *RPCError
 	)
@@ -735,8 +803,16 @@ func (s *Session) Exchange(ctx context.Context, method string, in, out any, opts
 		if err != nil && respError == nil {
 			tempReq.Error = ErrRPCUnknown.WithMessage("failed to call %s [%s]: %v", req.Method, getMessageName(req), err)
 		}
-		if _, hooksErr := s.callAllHooks(ctx, &tempReq, "response"); hooksErr != nil && err == nil {
+		if hooksMessage, hooksErr := s.callAllHooks(ctx, &tempReq, "response"); hooksErr != nil && err == nil {
 			err = fmt.Errorf("failed to call \"response\" hooks: %w", hooksErr)
+		} else if hooksMessage != nil {
+			resp = *hooksMessage
+		}
+		if err == nil {
+			err = addHookMutationsMeta(&resp)
+		}
+		if unmarshalErr := s.marshalResponse(resp, out); unmarshalErr != nil && err == nil {
+			err = ErrRPCUnknown.WithMessage("failed to unmarshal response: %v", unmarshalErr)
 		}
 	}()
 
@@ -753,7 +829,7 @@ func (s *Session) Exchange(ctx context.Context, method string, in, out any, opts
 	go func() {
 		defer close(errChan)
 
-		if err := s.Send(ctx, *req); err != nil {
+		if err := s.Send(ctx, req); err != nil {
 			errChan <- fmt.Errorf("failed to send request: %w", err)
 		}
 	}()
@@ -781,15 +857,17 @@ func (s *Session) Exchange(ctx context.Context, method string, in, out any, opts
 			// If the error is nil, then the send call was successful.
 			// Set the error channel to nil so that this case always blocks.
 			errChan = nil
-		case m := <-ch:
+		case resp = <-ch:
 			if isInit {
-				if err := s.postInit(&m); err != nil {
+				if err := s.postInit(&resp); err != nil {
 					return fmt.Errorf("failed to post init: %w", err)
 				}
 			}
-			respResult = m.Result
-			respError = m.Error
-			return s.marshalResponse(m, out)
+			respResult = resp.Result
+			respError = resp.Error
+			// Don't marshal the response until we've called all the hooks, otherwise hooks won't be able to modify the response.
+			// So return here and the response will be marshaled in the deferred function after the hooks are called, if any.
+			return
 		}
 	}
 }
@@ -820,8 +898,7 @@ func newSession(ctx context.Context, wire Wire, handler MessageHandler, session 
 		s.InitializeRequest = session.InitializeRequest
 		s.InitializeResult = session.InitializeResult
 	}
-	withSession := WithSession(ctx, s)
-	s.ctx, s.cancel = context.WithCancelCause(withSession)
+	s.ctx, s.cancel = context.WithCancelCause(WithSession(ctx, s))
 
 	if err := wire.Start(s.ctx, s.onWire); err != nil {
 		return nil, err

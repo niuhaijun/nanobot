@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/envvar"
-	"github.com/nanobot-ai/nanobot/pkg/expr"
-	"github.com/nanobot-ai/nanobot/pkg/fileuri"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/mcp/auditlogs"
-	"github.com/nanobot-ai/nanobot/pkg/sampling"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/envvar"
+	"github.com/obot-platform/nanobot/pkg/expr"
+	"github.com/obot-platform/nanobot/pkg/fileuri"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/mcp/auditlogs"
+	"github.com/obot-platform/nanobot/pkg/sampling"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 )
 
 type Service struct {
@@ -239,16 +239,6 @@ func (c *clientFactory) get(envHash string) (*mcp.Client, error) {
 	return c.client, nil
 }
 
-func (c *clientFactory) Close(deleteSession bool) {
-	c.clientLock.Lock()
-	defer c.clientLock.Unlock()
-	if c.client != nil {
-		c.client.Close(deleteSession)
-		c.client = nil
-	}
-	c.envHash = ""
-}
-
 func (c *clientFactory) Serialize() (any, error) {
 	if c.client == nil || c.client.Session.ID() == "" {
 		return nil, nil
@@ -423,7 +413,7 @@ func (s *Service) newClient(ctx context.Context, name string, state *mcp.Session
 				s.collectAuditLog(auditLog)
 			}()
 
-			return session.Send(mcp.WithMCPServerConfig(mcp.WithAuditLog(ctx, auditLog), mcpConfig), msg)
+			return session.Send(mcp.WithMCPServerConfig(mcp.WithAuditLog(ctx, auditLog), mcpConfig), &msg)
 		},
 		OnLogging: func(ctx context.Context, logMsg mcp.LoggingMessage) (err error) {
 			data, err := json.Marshal(mcp.LoggingMessage{
@@ -458,7 +448,7 @@ func (s *Service) newClient(ctx context.Context, name string, state *mcp.Session
 				s.collectAuditLog(auditLog)
 			}()
 
-			return session.Send(mcp.WithMCPServerConfig(mcp.WithAuditLog(ctx, auditLog), mcpConfig), msg)
+			return session.Send(mcp.WithMCPServerConfig(mcp.WithAuditLog(ctx, auditLog), mcpConfig), &msg)
 		},
 		Runner: &s.runner,
 		HTTPClientOptions: mcp.HTTPClientOptions{
@@ -559,6 +549,9 @@ func (s *Service) newClient(ctx context.Context, name string, state *mcp.Session
 	}
 
 	sessionCtx := session.Context()
+	if req := mcp.RequestFromContext(ctx); req != nil {
+		sessionCtx = mcp.WithRequest(sessionCtx, req)
+	}
 	token := mcp.TokenFromContext(ctx)
 	if token != "" {
 		sessionCtx = mcp.WithToken(sessionCtx, token)
@@ -648,7 +641,7 @@ func (s *Service) Call(ctx context.Context, server, tool string, args any, opts 
 			return
 		}
 		if ret.StructuredContent == nil && len(ret.Content) == 1 && ret.Content[0].Text != "" {
-			var obj any
+			var obj map[string]any
 			if err := json.Unmarshal([]byte(ret.Content[0].Text), &obj); err == nil {
 				ret.StructuredContent = obj
 			}
@@ -773,11 +766,42 @@ func (s *Service) Call(ctx context.Context, server, tool string, args any, opts 
 	if err != nil {
 		return nil, err
 	}
-	return &types.CallResult{
+	return addHookMutationContent(&types.CallResult{
+		Meta:              mcpCallResult.Meta,
 		StructuredContent: mcpCallResult.StructuredContent,
 		Content:           mcpCallResult.Content,
 		IsError:           mcpCallResult.IsError,
-	}, nil
+	}), nil
+}
+
+func addHookMutationContent(response *types.CallResult) *types.CallResult {
+	if response.Meta == nil {
+		return response
+	}
+
+	var mutations map[string]mcp.HookMutation
+	if err := mcp.JSONCoerce(response.Meta[mcp.HookMutationsMetaKey], &mutations); err != nil || len(mutations) == 0 {
+		return response
+	}
+
+	if mutation := mutations["request"]; mutation.Mutated {
+		// Prepend output with request mutation details for better observability.
+		response.Content = append([]mcp.Content{hookMutationContent("request", mutation.Reasons)}, response.Content...)
+	}
+	if mutation := mutations["response"]; mutation.Mutated {
+		// Append output with response mutation details for better observability.
+		response.Content = append(response.Content, hookMutationContent("response", mutation.Reasons))
+	}
+
+	return response
+}
+
+func hookMutationContent(direction string, reasons []string) mcp.Content {
+	text := fmt.Sprintf("MCP %s was mutated by hooks.", direction)
+	if len(reasons) > 0 {
+		text += " Reasons: " + strings.Join(reasons, "; ")
+	}
+	return mcp.Content{Type: "text", Text: text}
 }
 
 type ListToolsOptions struct {
@@ -874,7 +898,7 @@ func filterTools(tools *mcp.ListToolsResult, filter []string) *mcp.ListToolsResu
 	if len(filter) == 0 {
 		return tools
 	}
-	var filteredTools mcp.ListToolsResult
+	filteredTools := mcp.ListToolsResult{Meta: tools.Meta}
 	for _, tool := range tools.Tools {
 		if slices.Contains(filter, tool.Name) {
 			filteredTools.Tools = append(filteredTools.Tools, tool)
@@ -937,7 +961,8 @@ func (s *Service) listToolsForReferences(ctx context.Context, toolList []string)
 }
 
 func (s *Service) BuildToolMappings(ctx context.Context, toolList []string, opts ...types.BuildToolMappingsOptions) (types.ToolMappings, error) {
-	tools, err := s.listToolsForReferences(ctx, toolList)
+	// Separate the audit log from the context so that the audit log only reflects the operations for this specific call.
+	tools, err := s.listToolsForReferences(mcp.WithAuditLog(ctx, new(auditlogs.MCPAuditLog)), toolList)
 	if err != nil {
 		return nil, err
 	}
@@ -957,10 +982,6 @@ func hasOnlySampleKeys(args map[string]any) bool {
 		}
 	}
 	return true
-}
-
-func fileAttachmentPath(uri string) (string, error) {
-	return fileuri.Decode(uri)
 }
 
 func attachmentPreview(attachment types.Attachment, decodedPath string) mcp.Content {

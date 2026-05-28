@@ -8,18 +8,19 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/session"
-	"github.com/nanobot-ai/nanobot/pkg/skillformat"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/session"
+	"github.com/obot-platform/nanobot/pkg/skillformat"
 )
 
 func TestRecordWorkflowRun_DeduplicatesURI(t *testing.T) {
 	s := NewToolsServer()
 	ctx := t.Context()
-	manager, err := session.NewManager("sqlite::memory:")
+	store, err := session.NewStoreFromDSN("sqlite::memory:")
 	if err != nil {
-		t.Fatalf("failed to create session manager: %v", err)
+		t.Fatalf("failed to create session store: %v", err)
 	}
+	manager := session.NewManager(store)
 
 	if err := manager.DB.Create(ctx, &session.Session{
 		SessionID: "test-session",

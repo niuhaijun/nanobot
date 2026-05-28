@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/tools"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/tools"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 const progressSessionKey = "progress"
@@ -248,7 +248,20 @@ func (c chatCall) chatInvoke(ctx context.Context, msg mcp.Message, payload mcp.C
 		return nil, err
 	}
 
+	// If the LLM proxy replaced the user message due to a policy violation,
+	// copy InputReplacement from the execution into the progress response so
+	// that the frontend receives it via the SSE event stream.
+	var run types.Execution
+	if session.Get(types.PreviousExecutionKey, &run) && run.Response != nil && run.Response.InputReplacement != "" {
+		var progress types.CompletionResponse
+		if session.Get(progressSessionKey, &progress) {
+			progress.InputReplacement = run.Response.InputReplacement
+			session.Set(progressSessionKey, &progress)
+		}
+	}
+
 	mcpResult := mcp.CallToolResult{
+		Meta:              result.Meta,
 		StructuredContent: result.StructuredContent,
 		IsError:           result.IsError,
 		Content:           result.Content,

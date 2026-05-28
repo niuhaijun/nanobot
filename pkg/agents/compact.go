@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 )
 
 const (
@@ -33,7 +33,7 @@ func shouldCompact(req types.CompletionRequest, contextWindowSize int) bool {
 		return false
 	}
 
-	estimated := estimateTokens(req.Input, req.SystemPrompt, req.Tools)
+	estimated := estimateTokens(req.Model, req.Input, req.SystemPrompt, req.Tools)
 	threshold := int(float64(contextWindowSize) * compactionThreshold)
 	return estimated > threshold
 }

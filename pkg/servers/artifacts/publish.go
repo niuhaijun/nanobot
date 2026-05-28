@@ -11,7 +11,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/nanobot-ai/nanobot/pkg/skillformat"
+	"github.com/obot-platform/nanobot/pkg/skillformat"
 )
 
 type publishArtifactParams struct {
@@ -88,7 +88,7 @@ func (s *Server) publishArtifact(ctx context.Context, params publishArtifactPara
 
 	msg := fmt.Sprintf("Published %s v%d", apiResp.Name, apiResp.LatestVersion)
 	if apiResp.LatestVersion == 1 {
-		msg += ". This artifact is currently private. The user can change visibility to public in the Obot UI."
+		msg += ". This artifact is currently only visible to its owner. Use setArtifactSubjects to share it with users, groups, or all Obot users."
 	}
 
 	return &publishResult{

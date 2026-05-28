@@ -3,11 +3,12 @@ package system
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 // Helper function to create AgentPermissions from a map
@@ -25,7 +26,7 @@ func createPermissions(t *testing.T, perms map[string]string) *types.AgentPermis
 }
 
 func TestConfigSkillsPermissionAppendsInstructions(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	agent := &types.HookAgent{
@@ -71,7 +72,7 @@ func TestConfigSkillsPermissionAppendsInstructions(t *testing.T) {
 }
 
 func TestConfigSkillsPermissionIncludesSkillDetails(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	agent := &types.HookAgent{
@@ -95,7 +96,7 @@ func TestConfigSkillsPermissionIncludesSkillDetails(t *testing.T) {
 	instructions := result.Agent.Instructions.Instructions
 
 	// Check for specific skills we know exist
-	expectedSkills := []string{"python-scripts", "workflows"}
+	expectedSkills := []string{"python-scripts", "scheduled-tasks", "workflows"}
 	for _, skillName := range expectedSkills {
 		if !strings.Contains(instructions, skillName) {
 			t.Errorf("expected skill '%s' to be listed in instructions", skillName)
@@ -114,7 +115,7 @@ func TestConfigSkillsPermissionIncludesSkillDetails(t *testing.T) {
 }
 
 func TestConfigNoSkillsPermission(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	originalInstructions := "You are a helpful assistant."
@@ -154,7 +155,7 @@ func TestConfigNoSkillsPermission(t *testing.T) {
 }
 
 func TestConfigSkillsPermissionDenied(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	originalInstructions := "You are a helpful assistant."
@@ -193,7 +194,7 @@ func TestConfigSkillsPermissionDenied(t *testing.T) {
 
 func TestConfigWithUserSkills(t *testing.T) {
 	// Use test data directory with user skills
-	server := NewServer(testdataDir(t, "with-user-skills"))
+	server := NewServer("", testdataDir(t, "with-user-skills"))
 	ctx := context.Background()
 
 	agent := &types.HookAgent{
@@ -232,7 +233,7 @@ func TestConfigWithUserSkills(t *testing.T) {
 }
 
 func TestConfigEmptyInstructions(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	agent := &types.HookAgent{
@@ -266,7 +267,7 @@ func TestConfigEmptyInstructions(t *testing.T) {
 }
 
 func TestConfigNilAgent(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	result, err := server.config(ctx, types.AgentConfigHook{
@@ -284,7 +285,7 @@ func TestConfigNilAgent(t *testing.T) {
 }
 
 func TestConfigAddsToolsForPermissions(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	agent := &types.HookAgent{
@@ -314,6 +315,7 @@ func TestConfigAddsToolsForPermissions(t *testing.T) {
 		"nanobot.system/read",
 		"nanobot.system/write",
 		"nanobot.system/getSkill",
+		"nanobot.tasks",
 		"nanobot.workflow-tools",
 	}
 	for _, tool := range expectedTools {
@@ -332,10 +334,13 @@ func TestConfigAddsToolsForPermissions(t *testing.T) {
 	if _, ok := result.MCPServers["nanobot.workflow-tools"]; !ok {
 		t.Error("expected 'nanobot.workflow-tools' to be present in MCPServers")
 	}
+	if _, ok := result.MCPServers["nanobot.tasks"]; !ok {
+		t.Error("expected 'nanobot.tasks' to be present in MCPServers")
+	}
 }
 
 func TestConfigHook_MCPServerSearch(t *testing.T) {
-	s := NewServer("")
+	s := NewServer("", "")
 
 	tests := []struct {
 		name           string
@@ -420,14 +425,7 @@ func TestConfigHook_MCPServerSearch(t *testing.T) {
 				return
 			}
 
-			foundRefresh := false
-			for _, tool := range result.Agent.Tools {
-				if tool == "nanobot.obot-mcp-cli/refreshMCPServerConfig" {
-					foundRefresh = true
-					break
-				}
-			}
-			if !foundRefresh {
+			if !slices.Contains(result.Agent.Tools, "nanobot.obot-mcp-cli/refreshMCPServerConfig") {
 				t.Error("expected refreshMCPServerConfig tool when MCP_SERVER_SEARCH_URL is configured")
 			}
 
@@ -454,7 +452,7 @@ func TestConfigHook_MCPServerSearch(t *testing.T) {
 }
 
 func TestConfigSkillsPermissionAddsNanobotSkillsWithObotURL(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 	session := mcp.NewEmptySession(ctx)
 	session.Set(mcp.SessionEnvMapKey, map[string]string{
@@ -492,7 +490,7 @@ func TestConfigSkillsPermissionAddsNanobotSkillsWithObotURL(t *testing.T) {
 }
 
 func TestConfigSkillsPermissionSkipsNanobotSkillsWithoutObotURL(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 	session := mcp.NewEmptySession(ctx)
 	session.Set(mcp.SessionEnvMapKey, map[string]string{})

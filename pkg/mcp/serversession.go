@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 )
 
 var (
@@ -230,6 +230,7 @@ func (s *serverWire) subscribe(ctx context.Context) (<-chan Message, <-chan stru
 	s.subscriberLock.Unlock()
 	context.AfterFunc(ctx, func() {
 		s.removeSubscriber(ch)
+		close(ch)
 	})
 	return ch, s.ctx.Done()
 }

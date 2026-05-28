@@ -10,12 +10,12 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/nanobot-ai/nanobot/pkg/fileuri"
-	"github.com/nanobot-ai/nanobot/pkg/fswatch"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/skillformat"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/version"
+	"github.com/obot-platform/nanobot/pkg/fileuri"
+	"github.com/obot-platform/nanobot/pkg/fswatch"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/skillformat"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/version"
 	"log/slog"
 )
 
@@ -169,6 +169,9 @@ func (s *Server) resourcesList(ctx context.Context, msg mcp.Message, _ mcp.ListR
 				Name:     filepath.Base(relPath),
 				MimeType: mimeType,
 				Size:     info.Size(),
+				Annotations: &mcp.Annotations{
+					LastModified: info.ModTime(),
+				},
 			})
 			return nil
 		})
@@ -257,10 +260,7 @@ func (s *Server) readWorkflowFile(uri string) (*mcp.ReadResourceResult, error) {
 		MIMEType: mimeType,
 	}
 
-	if _, isImage := types.ImageMimeTypes[mimeType]; isImage {
-		blob := base64.StdEncoding.EncodeToString(contentBytes)
-		rc.Blob = &blob
-	} else if _, isPDF := types.PDFMimeTypes[mimeType]; isPDF {
+	if types.ResourceContentUseBlob(mimeType, contentBytes) {
 		blob := base64.StdEncoding.EncodeToString(contentBytes)
 		rc.Blob = &blob
 	} else {

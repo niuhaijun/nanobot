@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/mcp"
 )
 
 const connectedServersCacheTTL = 15 * time.Minute
@@ -28,7 +28,7 @@ type connectedServersCache struct {
 func (c *connectedServersCache) get() ([]ConnectedServer, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.fetched.IsZero() || time.Since(c.fetched) >= connectedServersCacheTTL {
+	if time.Since(c.fetched) >= connectedServersCacheTTL {
 		return nil, false
 	}
 	return c.servers, true

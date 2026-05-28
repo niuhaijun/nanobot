@@ -11,14 +11,14 @@ import (
 
 	"log/slog"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/llm/progress"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/schema"
-	"github.com/nanobot-ai/nanobot/pkg/sessiondata"
-	"github.com/nanobot-ai/nanobot/pkg/tools"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/llm/progress"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/schema"
+	"github.com/obot-platform/nanobot/pkg/sessiondata"
+	"github.com/obot-platform/nanobot/pkg/tools"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 )
 
 type Agents struct {
@@ -384,17 +384,13 @@ func (a *Agents) handleUIAction(ctx context.Context, config types.Config, req ty
 func (a *Agents) Complete(ctx context.Context, req types.CompletionRequest, opts ...types.CompletionOptions) (_ *types.CompletionResponse, err error) {
 	var (
 		previousExecutionKey = types.PreviousExecutionKey
-		session              = mcp.SessionFromContext(ctx)
+		session              = mcp.SessionFromContext(ctx).Root()
 		isChat               = session != nil
 		previousRun          *types.Execution
 		currentRun           = &types.Execution{}
 		baseConfig           = types.ConfigFromContext(ctx)
 		startID              = ""
 	)
-
-	for session != nil && session.Parent != nil {
-		session = session.Parent
-	}
 
 	if len(req.Input) > 0 {
 		startID = req.Input[0].ID
@@ -444,10 +440,17 @@ func (a *Agents) Complete(ctx context.Context, req types.CompletionRequest, opts
 			return nil, err
 		}
 
-		ctx := types.WithConfig(ctx, config)
+		// Use a new context so that we don't leak values.
+		runCtx := types.WithConfig(ctx, config)
 
-		if err := a.run(ctx, config, currentRun, previousRun, opts); err != nil {
+		if err := a.run(runCtx, config, currentRun, previousRun, opts); err != nil {
 			return nil, err
+		}
+
+		// If the LLM proxy replaced the user message due to a policy violation,
+		// update the stored input to reflect the replacement.
+		if currentRun.Response != nil && currentRun.Response.InputReplacement != "" && currentRun.PopulatedRequest != nil {
+			replaceLastUserMessage(currentRun.PopulatedRequest, currentRun.Response.InputReplacement)
 		}
 
 		if isChat {
@@ -455,7 +458,7 @@ func (a *Agents) Complete(ctx context.Context, req types.CompletionRequest, opts
 		}
 
 		// This doesn't return an error because any issues we run into should be returned to the LLM for further processing.
-		a.toolCalls(ctx, currentRun, opts)
+		a.toolCalls(runCtx, currentRun, opts)
 
 		if currentRun.Done {
 			if isChat {
@@ -483,6 +486,36 @@ func (a *Agents) Complete(ctx context.Context, req types.CompletionRequest, opts
 	}
 }
 
+func replaceLastUserMessage(req *types.CompletionRequest, replacement string) {
+	for i := len(req.Input) - 1; i >= 0; i-- {
+		if req.Input[i].Role != "user" {
+			continue
+		}
+		// Only replace user messages that contain text content, not tool_result
+		// messages (which also have role "user"). This matches the proxy behavior
+		// in obot which only evaluates policies against text user messages.
+		hasText := false
+		for _, item := range req.Input[i].Items {
+			if item.Content != nil {
+				hasText = true
+				break
+			}
+		}
+		if !hasText {
+			continue
+		}
+		req.Input[i].Items = []types.CompletionItem{
+			{
+				Content: &mcp.Content{
+					Type: "text",
+					Text: replacement,
+				},
+			},
+		}
+		return
+	}
+}
+
 func (a *Agents) GetConfigForAgent(ctx context.Context, agentName string) (types.Config, error) {
 	config := types.ConfigFromContext(ctx)
 	return a.configHook(ctx, config, agentName)
@@ -495,9 +528,9 @@ func (a *Agents) configHook(ctx context.Context, baseConfig types.Config, agentN
 
 	agent := baseConfig.Agents[agentName]
 	if !slices.ContainsFunc(agent.Hooks, func(hook mcp.HookMapping) bool {
-		return hook.Name == "config" && slices.Contains(hook.Targets, "nanobot.system/config")
+		return hook.Name == "config" && slices.Contains(hook.Targets, mcp.HookTarget{Target: "nanobot.system/config"})
 	}) {
-		agent.Hooks = append(agent.Hooks, mcp.HookMapping{Name: "config", Targets: []string{"nanobot.system/config"}})
+		agent.Hooks = append(agent.Hooks, mcp.HookMapping{Name: "config", Targets: []mcp.HookTarget{{Target: "nanobot.system/config"}}})
 	}
 	hookResult, err := mcp.InvokeHooks(ctx, a.registry, agent.Hooks, &types.AgentConfigHook{
 		Agent:     &agent.HookAgent,

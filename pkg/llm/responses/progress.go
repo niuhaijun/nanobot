@@ -10,14 +10,18 @@ import (
 
 	"log/slog"
 
-	llmProgress "github.com/nanobot-ai/nanobot/pkg/llm/progress"
-	"github.com/nanobot-ai/nanobot/pkg/log"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	llmProgress "github.com/obot-platform/nanobot/pkg/llm/progress"
+	"github.com/obot-platform/nanobot/pkg/log"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
-func progressResponse(ctx context.Context, agentName, modelName string, resp *http.Response, progressToken any) (response Response, seen bool, err error) {
+func progressResponse(ctx context.Context, agentName, modelName string, resp *http.Response, progressToken any) (response Response, seen bool, toolCallPolicyViolation string, err error) {
 	lines := bufio.NewScanner(resp.Body)
+	// Increase max scanner token size from 64 KiB to 1 MiB. The Responses API sends
+	// a response.completed event with the full response as a single SSE data: line,
+	// which can exceed 64 KiB and cause "bufio.Scanner: token too long" errors.
+	lines.Buffer(make([]byte, 0, 4096), 1024*1024)
 	defer resp.Body.Close()
 
 	progress := types.CompletionProgress{
@@ -26,9 +30,8 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 	}
 
 	var (
-		accumulatedText string
-		accumulatedArgs string
-		outputs         []ResponseOutput
+		accumulatedText, accumulatedArgs strings.Builder
+		outputs                          []ResponseOutput
 	)
 	for lines.Scan() {
 		line := lines.Text()
@@ -39,8 +42,20 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 		}
 		switch strings.TrimSpace(header) {
 		case "data":
-			var event Progress
 			body = strings.TrimSpace(body)
+
+			// Check for tool call policy violation marker from the proxy.
+			if strings.HasPrefix(body, `{"obot_tool_call_policy_violation"`) {
+				var v struct {
+					Violation string `json:"obot_tool_call_policy_violation"`
+				}
+				if err := json.Unmarshal([]byte(body), &v); err == nil {
+					toolCallPolicyViolation = v.Violation
+				}
+				continue
+			}
+
+			var event Progress
 			data := []byte(body)
 			if err := json.Unmarshal(data, &event); err != nil {
 				slog.Error("failed to decode event", "error", err, "body", body)
@@ -74,7 +89,7 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 					}
 				}
 			case "response.function_call_arguments.delta":
-				accumulatedArgs += event.Delta
+				accumulatedArgs.WriteString(event.Delta)
 				progress.Item.ToolCall.Arguments = event.Delta
 				llmProgress.Send(ctx, &progress, progressToken)
 			case "response.output_item.done":
@@ -86,7 +101,7 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 							ID:        event.Item.ID,
 							CallID:    event.Item.CallID,
 							Name:      event.Item.Name,
-							Arguments: accumulatedArgs,
+							Arguments: accumulatedArgs.String(),
 						},
 					})
 				case "message":
@@ -95,13 +110,13 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 							ID:   event.Item.ID,
 							Role: event.Item.Role,
 							Content: []MessageContent{
-								{OutputText: &OutputText{Text: accumulatedText}},
+								{OutputText: &OutputText{Text: accumulatedText.String()}},
 							},
 						},
 					})
 				}
-				accumulatedText = ""
-				accumulatedArgs = ""
+				accumulatedText.Reset()
+				accumulatedArgs.Reset()
 
 				// Send progress notification
 				if progress.Item.ID != "" {
@@ -113,7 +128,7 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 				}
 				progress.Item = types.CompletionItem{}
 			case "response.output_text.delta":
-				accumulatedText += event.Delta
+				accumulatedText.WriteString(event.Delta)
 				if progress.Item.Content != nil {
 					progress.Item.Content.Text = event.Delta
 					llmProgress.Send(ctx, &progress, progressToken)
@@ -174,12 +189,13 @@ func progressResponse(ctx context.Context, agentName, modelName string, resp *ht
 
 			if response.Output[outputIndex].Message.Content[contentIndex].OutputText != nil {
 				if response.Output[outputIndex].Message.Content[contentIndex].OutputText.Text != "" {
-					accumulatedText = response.Output[outputIndex].Message.Content[contentIndex].OutputText.Text
+					accumulatedText.Reset()
+					accumulatedText.WriteString(response.Output[outputIndex].Message.Content[contentIndex].OutputText.Text)
 				}
-				response.Output[outputIndex].Message.Content[contentIndex].OutputText.Text = accumulatedText + errorText
+				response.Output[outputIndex].Message.Content[contentIndex].OutputText.Text = accumulatedText.String() + errorText
 			} else {
 				response.Output[outputIndex].Message.Content[contentIndex].OutputText = &OutputText{
-					Text: accumulatedText + errorText,
+					Text: accumulatedText.String() + errorText,
 				}
 			}
 

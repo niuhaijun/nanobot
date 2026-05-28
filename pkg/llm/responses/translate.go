@@ -7,8 +7,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 func toResponse(req *types.CompletionRequest, resp *Response) (*types.CompletionResponse, error) {
@@ -93,35 +93,25 @@ func toSamplingMessageFromOutputMessage(output *Message) (result []types.Complet
 
 func toRequest(completion *types.CompletionRequest) (req Request, _ error) {
 	req = Request{
-		Model: completion.Model,
-		Store: &[]bool{false}[0],
+		Model:     completion.Model,
+		Store:     new(false),
+		Reasoning: &ResponseReasoning{},
 	}
 
-	if reasoningPrefix.MatchString(req.Model) {
-		req.Include = append(req.Include, "reasoning.encrypted_content")
-		req.Reasoning = &ResponseReasoning{}
-		if completion.Reasoning != nil && completion.Reasoning.Summary != "" {
-			req.Reasoning.Summary = &completion.Reasoning.Summary
-		} else {
-			req.Reasoning.Summary = &[]string{"auto"}[0]
-		}
-		if completion.Reasoning != nil && completion.Reasoning.Effort != "" {
-			req.Reasoning.Effort = &completion.Reasoning.Effort
-		} else {
-			req.Reasoning.Effort = &[]string{"medium"}[0]
-		}
+	req.Include = append(req.Include, "reasoning.encrypted_content")
+	if completion.Reasoning != nil && completion.Reasoning.Summary != "" {
+		req.Reasoning.Summary = &completion.Reasoning.Summary
+	} else {
+		req.Reasoning.Summary = new("auto")
+	}
+	if completion.Reasoning != nil && completion.Reasoning.Effort != "" {
+		req.Reasoning.Effort = &completion.Reasoning.Effort
+	} else {
+		req.Reasoning.Effort = new("medium")
 	}
 
 	if completion.Truncation != "" {
 		req.Truncation = &completion.Truncation
-	}
-
-	if completion.Temperature != nil && !reasoningPrefix.MatchString(req.Model) {
-		req.Temperature = completion.Temperature
-	}
-
-	if completion.TopP != nil && !reasoningPrefix.MatchString(req.Model) {
-		req.TopP = completion.TopP
 	}
 
 	if len(completion.Metadata) > 0 {

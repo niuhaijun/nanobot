@@ -23,7 +23,13 @@ type Message struct {
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *RPCError       `json:"error,omitempty"`
 
-	Session *Session `json:"-"`
+	Session       *Session                `json:"-"`
+	HookMutations map[string]HookMutation `json:"-"`
+}
+
+type HookMutation struct {
+	Mutated bool     `json:"mutated"`
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 func NewMessage(method string, params any) (*Message, error) {
@@ -135,7 +141,7 @@ func (r *Message) SendError(ctx context.Context, err error) {
 		data = ErrRPCInternal.WithError(err)
 	}
 
-	resp := Message{
+	resp := &Message{
 		JSONRPC: r.JSONRPC,
 		ID:      r.ID,
 		Error:   data,
@@ -151,7 +157,7 @@ func (r *Message) Reply(ctx context.Context, result any) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal result: %w", err)
 	}
-	return r.Session.Send(ctx, Message{
+	return r.Session.Send(ctx, &Message{
 		JSONRPC: r.JSONRPC,
 		ID:      r.ID,
 		Result:  data,

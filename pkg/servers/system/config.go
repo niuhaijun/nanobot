@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/servers/obotmcp"
-	"github.com/nanobot-ai/nanobot/pkg/skillformat"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/servers/obotmcp"
+	"github.com/obot-platform/nanobot/pkg/skillformat"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 var allowedPermsToTools = map[string][]string{
@@ -28,7 +28,20 @@ var allowedPermsToTools = map[string][]string{
 }
 
 func (s *Server) config(ctx context.Context, params types.AgentConfigHook) (types.AgentConfigHook, error) {
+	session := mcp.SessionFromContext(ctx)
+	var envMap map[string]string
+	if session != nil {
+		envMap = session.GetEnvMap()
+	}
 	if agent := params.Agent; agent != nil && agent.Name != "nanobot.summary" {
+		if agent.Model == "" {
+			// Ensure the model is set so that we count tokens accordingly for compaction.
+			agent.Model = envMap["NANOBOT_DEFAULT_MODEL"]
+			if agent.Model == "" {
+				agent.Model = s.defaultModel
+			}
+		}
+
 		for _, perm := range agent.Permissions.Allowed(maps.Keys(allowedPermsToTools)) {
 			for _, tool := range allowedPermsToTools[perm] {
 				agent.Tools = append(agent.Tools, "nanobot.system/"+tool)
@@ -57,10 +70,8 @@ func (s *Server) config(ctx context.Context, params types.AgentConfigHook) (type
 						skillsPrompt.WriteString("\n")
 					}
 
-					if session := mcp.SessionFromContext(ctx); session != nil {
-						if envMap := session.GetEnvMap(); envMap["OBOT_URL"] != "" {
-							skillsPrompt.WriteString("\nWhen you need a new skill that is not already installed, use the searchSkills tool to search Obot.\n")
-						}
+					if envMap["OBOT_URL"] != "" {
+						skillsPrompt.WriteString("\nWhen you need a new skill that is not already installed, use the searchSkills tool to search Obot.\n")
 					}
 					// Append to agent instructions
 					agent.Instructions.Instructions += skillsPrompt.String()
@@ -69,12 +80,10 @@ func (s *Server) config(ctx context.Context, params types.AgentConfigHook) (type
 				// Make workflow and artifact tools available to agents with skills permission.
 				agent.Tools = append(agent.Tools, "nanobot.workflow-tools")
 				agent.Tools = append(agent.Tools, "nanobot.artifacts")
+				agent.Tools = append(agent.Tools, "nanobot.tasks")
 
-				session := mcp.SessionFromContext(ctx)
-				if session != nil {
-					if envMap := session.GetEnvMap(); envMap["OBOT_URL"] != "" {
-						agent.Tools = append(agent.Tools, "nanobot.skills")
-					}
+				if envMap["OBOT_URL"] != "" {
+					agent.Tools = append(agent.Tools, "nanobot.skills")
 				}
 			}
 		}
@@ -113,15 +122,28 @@ Do NOT put skill files in the session directory or workflow directory.
 		params.MCPServers["nanobot.workflows"] = types.AgentConfigHookMCPServer{}
 		params.MCPServers["nanobot.workflow-tools"] = types.AgentConfigHookMCPServer{}
 		params.MCPServers["nanobot.artifacts"] = types.AgentConfigHookMCPServer{}
-		session := mcp.SessionFromContext(ctx)
-		if session != nil {
-			if envMap := session.GetEnvMap(); envMap["OBOT_URL"] != "" && agent.Permissions != nil && agent.Permissions.IsAllowed("skills") {
-				params.MCPServers["nanobot.skills"] = types.AgentConfigHookMCPServer{}
-			}
+		params.MCPServers["nanobot.tasks"] = types.AgentConfigHookMCPServer{}
+		if envMap["OBOT_URL"] != "" && agent.Permissions != nil && agent.Permissions.IsAllowed("skills") {
+			params.MCPServers["nanobot.skills"] = types.AgentConfigHookMCPServer{}
 		}
 
 		obotmcp.ConfigureIntegration(ctx, agent, &params)
+
+		if envMap["OBOT_URL"] != "" {
+			agent.Instructions.Instructions += messagePolicyPrompt
+		}
 	}
 
 	return params, nil
 }
+
+const messagePolicyPrompt = `
+
+## Message Policies
+
+Your messages are subject to administrator-configured content policies. These policies are enforced automatically and may block certain requests or tool calls.
+
+- If a user message in the conversation history is prefixed with "[policy-violation]", it means the user's original message was blocked by a content policy. The text after the prefix is the explanation of the violation.
+- If a tool call returns an error due to a policy violation, it means the tool call was blocked by a content policy.
+
+When a policy violation occurs, do not attempt to help the user rephrase, reword, or otherwise work around the policy. Do not suggest alternative approaches that would circumvent the intent of the policy. Simply inform the user that their request could not be completed due to a content policy.`

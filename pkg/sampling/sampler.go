@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 )
 
 var ErrNoMatchingModel = fmt.Errorf("no matching model found")
@@ -196,6 +196,7 @@ func (s *Sampler) Sample(ctx context.Context, req mcp.CreateMessageRequest, opts
 				toolCallResult = &types.ToolCallResult{
 					CallID: currentContent.ToolUseID,
 					Output: types.CallResult{
+						Meta:              currentContent.Meta,
 						Content:           currentContent.Content,
 						IsError:           currentContent.IsError,
 						StructuredContent: currentContent.StructuredContent,

@@ -10,8 +10,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/mcp"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,6 +23,7 @@ const (
 	DefaultAgentSessionKey          = "defaultAgent"
 	AccountIDSessionKey             = "accountID"
 	DescriptionSessionKey           = "description"
+	TaskURISessionKey               = "taskURI"
 	ResourceSubscriptionsSessionKey = "resourceSubscriptions"
 	PublicURLSessionKey             = "publicURL"
 )
@@ -68,18 +69,26 @@ func CurrentAgent(ctx context.Context) string {
 	return currentAgent
 }
 
+type LLMProvider struct {
+	Dialect Dialect           `json:"dialect,omitempty"`
+	APIKey  string            `json:"apiKey,omitempty"`
+	BaseURL string            `json:"baseURL,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+}
+
 type Config struct {
-	Auth             *Auth                 `json:"auth,omitempty"`
-	Extends          StringList            `json:"extends,omitempty"`
-	Env              map[string]EnvDef     `json:"env,omitempty"`
-	Publish          Publish               `json:"publish,omitzero"`
-	Agents           map[string]Agent      `json:"agents,omitempty"`
-	MCPServers       map[string]mcp.Server `json:"mcpServers,omitempty"`
-	Profiles         map[string]Config     `json:"profiles,omitempty"`
-	Prompts          map[string]Prompt     `json:"prompts,omitempty"`
-	Hooks            mcp.Hooks             `json:"hooks,omitempty"`
-	WorkspaceID      string                `json:"workspaceId,omitempty"`
-	WorkspaceBaseURI string                `json:"workspaceBaseUri,omitempty"`
+	Auth             *Auth                  `json:"auth,omitempty"`
+	Extends          StringList             `json:"extends,omitempty"`
+	Env              map[string]EnvDef      `json:"env,omitempty"`
+	Publish          Publish                `json:"publish,omitzero"`
+	LLMProviders     map[string]LLMProvider `json:"llmProviders,omitempty"`
+	Agents           map[string]Agent       `json:"agents,omitempty"`
+	MCPServers       map[string]mcp.Server  `json:"mcpServers,omitempty"`
+	Profiles         map[string]Config      `json:"profiles,omitempty"`
+	Prompts          map[string]Prompt      `json:"prompts,omitempty"`
+	Hooks            mcp.Hooks              `json:"hooks,omitempty"`
+	WorkspaceID      string                 `json:"workspaceId,omitempty"`
+	WorkspaceBaseURI string                 `json:"workspaceBaseUri,omitempty"`
 }
 
 type ConfigFactory func(ctx context.Context, profiles string) (Config, error)

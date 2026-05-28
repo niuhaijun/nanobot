@@ -4,8 +4,8 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/nanobot-ai/nanobot/pkg/log"
-	"github.com/nanobot-ai/nanobot/pkg/tools"
+	"github.com/obot-platform/nanobot/pkg/log"
+	"github.com/obot-platform/nanobot/pkg/tools"
 	"github.com/spf13/cobra"
 )
 
@@ -35,12 +35,12 @@ func (t *Targets) Customize(cmd *cobra.Command) {
 
 func (t *Targets) Run(cmd *cobra.Command, args []string) error {
 	log.EnableMessages = false
-	r, err := t.n.GetRuntime()
+	r, err := t.n.GetRuntime(cmd.Context())
 	if err != nil {
 		return err
 	}
 
-	c, err := t.n.ReadConfig(cmd.Context(), t.n.ConfigPath, !t.n.ExcludeBuiltInAgents)
+	c, err := t.n.ReadConfig(cmd.Context(), t.n.ConfigPaths(), !t.n.ExcludeBuiltInAgents)
 	if err != nil {
 		return err
 	}

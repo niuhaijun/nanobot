@@ -3,8 +3,8 @@ package cli
 import (
 	"os"
 
-	"github.com/nanobot-ai/nanobot/pkg/chat"
-	"github.com/nanobot-ai/nanobot/pkg/runtime"
+	"github.com/obot-platform/nanobot/pkg/chat"
+	"github.com/obot-platform/nanobot/pkg/runtime"
 	"github.com/spf13/cobra"
 )
 
@@ -39,14 +39,15 @@ func (e *Call) Customize(cmd *cobra.Command) {
 }
 
 func (e *Call) Run(cmd *cobra.Command, args []string) error {
-	cfg, err := e.n.ReadConfig(cmd.Context(), e.n.ConfigPath, !e.n.ExcludeBuiltInAgents)
+	cfg, err := e.n.ReadConfig(cmd.Context(), e.n.ConfigPaths(), !e.n.ExcludeBuiltInAgents)
 	if err != nil {
 		return err
 	}
-	runtime, err := e.n.GetRuntime(runtime.Options{
+	runtime, err := e.n.GetRuntime(cmd.Context(), runtime.Options{
 		MaxConcurrency: e.n.MaxConcurrency,
 		DSN:            e.n.DSN(),
-		ConfigDir:      e.n.ConfigPath,
+		DefaultModel:   e.n.DefaultModel,
+		ConfigDir:      e.n.RuntimeConfigDir(),
 	})
 	if err != nil {
 		return err

@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/mcp/auditlogs"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/mcp/auditlogs"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 	"github.com/tidwall/gjson"
 )
 
@@ -190,6 +190,7 @@ func (h *HTTPServer) streamEvents(rw http.ResponseWriter, req *http.Request, aud
 		return
 	}
 	slog.Debug("mcp server opening event stream", "session_id", id, "path", req.URL.Path)
+	defer slog.Debug("mcp server closed event stream", "session_id", id, "path", req.URL.Path)
 
 	session, ok, err := h.sessions.Acquire(req.Context(), h.MessageHandler, id)
 	if err != nil {
@@ -246,8 +247,8 @@ func (h *HTTPServer) streamEvents(rw http.ResponseWriter, req *http.Request, aud
 
 type requestKey struct{}
 
-func withRequest(req *http.Request) context.Context {
-	return context.WithValue(req.Context(), requestKey{}, req)
+func WithRequest(ctx context.Context, req *http.Request) context.Context {
+	return context.WithValue(ctx, requestKey{}, req)
 }
 
 func RequestFromContext(ctx context.Context) *http.Request {
@@ -263,7 +264,7 @@ func (h *HTTPServer) healthz(rw http.ResponseWriter, req *http.Request) {
 	if healthErr == nil {
 		http.Error(rw, "waiting for startup", http.StatusTooEarly)
 	} else if *healthErr != nil {
-		http.Error(rw, (*healthErr).Error(), http.StatusServiceUnavailable)
+		http.Error(rw, (*healthErr).Error(), http.StatusInternalServerError)
 	} else {
 		rw.WriteHeader(http.StatusOK)
 	}
@@ -274,7 +275,7 @@ func (h *HTTPServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 }
 
 func (h *HTTPServer) serveHTTP(rw http.ResponseWriter, req *http.Request) {
-	req = req.WithContext(withRequest(req))
+	req = req.WithContext(WithRequest(req.Context(), req))
 	start := time.Now()
 	// Determine audit log method and session ID based on HTTP method
 	sessionID := h.sessions.ExtractID(req)
@@ -479,6 +480,13 @@ func (h *HTTPServer) serveHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	session.session.sessionManager = h.sessions
 	session.session.SetEnv(h.getEnv(req))
+
+	if desc := req.Header.Get("X-Nanobot-Description"); desc != "" {
+		session.session.Set("description", desc)
+	}
+	if taskURI := req.Header.Get("X-Nanobot-Task-URI"); taskURI != "" {
+		session.session.Set("taskURI", taskURI)
+	}
 
 	resp, err := session.Exchange(ctx, msg)
 	if err != nil {

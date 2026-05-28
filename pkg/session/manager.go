@@ -12,18 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/uuid"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/uuid"
 	"gorm.io/gorm"
 )
 
-func NewManager(dsn string) (*Manager, error) {
-	store, err := NewStoreFromDSN(dsn)
-	if err != nil {
-		return nil, err
-	}
-
+func NewManager(store *Store) *Manager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Manager{
 		ctx:          ctx,
@@ -31,7 +26,7 @@ func NewManager(dsn string) (*Manager, error) {
 		DB:           store,
 		root:         &Session{},
 		liveSessions: make(map[string]liveSession),
-	}, nil
+	}
 }
 
 type Manager struct {
@@ -65,17 +60,21 @@ func (m *Manager) newRecord(id, accountID string) *Session {
 func (m *Manager) loadAttributesFromRecord(stored *Session, session *mcp.ServerSession) {
 	session.GetSession().Set(types.DescriptionSessionKey, stored.Description)
 	session.GetSession().Set(types.AccountIDSessionKey, stored.AccountID)
+	session.GetSession().Set(types.TaskURISessionKey, stored.TaskURI)
 }
 
 func (m *Manager) saveAttributesToRecord(stored *Session, session *mcp.ServerSession) error {
 	var (
-		config types.Config
+		config  types.Config
+		taskURI string
 	)
 
 	session.GetSession().Get(types.DescriptionSessionKey, &stored.Description)
 	session.GetSession().Get(types.ConfigSessionKey, &config)
+	session.GetSession().Get(types.TaskURISessionKey, &taskURI)
 
 	stored.Config = ConfigWrapper(config)
+	stored.TaskURI = taskURI
 	return nil
 }
 
@@ -189,6 +188,11 @@ func (m *Manager) Acquire(ctx context.Context, server mcp.MessageHandler, id str
 			return nil, false, nil
 		}
 
+		if live.cancel != nil {
+			live.cancel()
+			live.cancel = nil
+		}
+
 		live.count++
 		m.liveSessions[id] = live
 		m.liveSessionsLock.Unlock()
@@ -209,6 +213,10 @@ func (m *Manager) Acquire(ctx context.Context, server mcp.MessageHandler, id str
 	live, ok = m.liveSessions[id]
 	if ok {
 		serverSession.Close(false)
+		if live.cancel != nil {
+			live.cancel()
+			live.cancel = nil
+		}
 		live.count++
 		m.liveSessions[id] = live
 		m.liveSessionsLock.Unlock()

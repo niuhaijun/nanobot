@@ -13,23 +13,21 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/api"
-	"github.com/nanobot-ai/nanobot/pkg/auth"
-	"github.com/nanobot-ai/nanobot/pkg/cmd"
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/config"
-	"github.com/nanobot-ai/nanobot/pkg/llm"
-	"github.com/nanobot-ai/nanobot/pkg/llm/anthropic"
-	"github.com/nanobot-ai/nanobot/pkg/llm/responses"
-	"github.com/nanobot-ai/nanobot/pkg/log"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/mcp/auditlogs"
-	"github.com/nanobot-ai/nanobot/pkg/runtime"
-	"github.com/nanobot-ai/nanobot/pkg/server"
-	"github.com/nanobot-ai/nanobot/pkg/session"
-	"github.com/nanobot-ai/nanobot/pkg/telemetry"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/version"
+	"github.com/obot-platform/nanobot/pkg/api"
+	"github.com/obot-platform/nanobot/pkg/auth"
+	"github.com/obot-platform/nanobot/pkg/cmd"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/config"
+	"github.com/obot-platform/nanobot/pkg/llm"
+	"github.com/obot-platform/nanobot/pkg/log"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/mcp/auditlogs"
+	"github.com/obot-platform/nanobot/pkg/runtime"
+	"github.com/obot-platform/nanobot/pkg/server"
+	"github.com/obot-platform/nanobot/pkg/session"
+	"github.com/obot-platform/nanobot/pkg/telemetry"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/version"
 	"github.com/spf13/cobra"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"sigs.k8s.io/yaml"
@@ -47,25 +45,18 @@ func New() *cobra.Command {
 }
 
 type Nanobot struct {
-	Debug                   bool              `usage:"Enable debug logging"`
-	Trace                   bool              `usage:"Enable trace logging"`
-	Env                     []string          `usage:"Environment variables to set in the form of KEY=VALUE, or KEY to load from current environ" short:"e"`
-	EnvFile                 string            `usage:"Path to the environment file (default: ./nanobot.env)" default:"./nanobot.env"`
-	EmptyEnv                bool              `usage:"Do not load environment variables from the environment by default"`
-	DefaultModel            string            `usage:"Default model to use for completions" default:"gpt-4.1" env:"NANOBOT_DEFAULT_MODEL" name:"default-model"`
-	DefaultMiniModel        string            `usage:"Default model to use for things like thread summaries" default:"gpt-4.1" env:"NANOBOT_DEFAULT_MINI_MODEL" name:"default-mini-model"`
-	OpenAIAPIKey            string            `usage:"OpenAI API key" env:"OPENAI_API_KEY" name:"openai-api-key"`
-	OpenAIBaseURL           string            `usage:"OpenAI API URL" env:"OPENAI_BASE_URL" name:"openai-base-url"`
-	OpenAIHeaders           map[string]string `usage:"OpenAI API headers" env:"OPENAI_HEADERS" name:"openai-headers"`
-	OpenAIChatCompletionAPI bool              `usage:"Use OpenAI Chat Completion API instead of the newer Responses API" env:"OPENAI_CHAT_COMPLETION_API" name:"openai-chat-completion-api"`
-	AnthropicAPIKey         string            `usage:"Anthropic API key" env:"ANTHROPIC_API_KEY" name:"anthropic-api-key"`
-	AnthropicBaseURL        string            `usage:"Anthropic API URL" env:"ANTHROPIC_BASE_URL" name:"anthropic-base-url"`
-	AnthropicHeaders        map[string]string `usage:"Anthropic API headers" env:"ANTHROPIC_HEADERS" name:"anthropic-headers"`
-	MaxConcurrency          int               `usage:"The maximum number of concurrent tasks in a parallel loop" default:"10" hidden:"true"`
-	Chdir                   string            `usage:"Change directory to this path before running the nanobot" default:"." short:"C"`
-	State                   string            `usage:"Path to the state file" default:"./nanobot.db"`
-	ConfigPath              string            `usage:"Path to nanobot configuration file or directory" default:".nanobot/" name:"config" short:"c"`
-	ExcludeBuiltInAgents    bool              `usage:"Exclude built-in agents from the configuration"`
+	Debug                bool     `usage:"Enable debug logging"`
+	Trace                bool     `usage:"Enable trace logging"`
+	Env                  []string `usage:"Environment variables to set in the form of KEY=VALUE, or KEY to load from current environ" short:"e"`
+	EnvFile              string   `usage:"Path to the environment file (default: ./nanobot.env)" default:"./nanobot.env"`
+	EmptyEnv             bool     `usage:"Do not load environment variables from the environment by default"`
+	DefaultModel         string   `usage:"Default model to use for completions" default:"gpt-4.1" env:"NANOBOT_DEFAULT_MODEL" name:"default-model"`
+	DefaultMiniModel     string   `usage:"Default model to use for things like thread summaries" default:"gpt-4.1" env:"NANOBOT_DEFAULT_MINI_MODEL" name:"default-mini-model"`
+	MaxConcurrency       int      `usage:"The maximum number of concurrent tasks in a parallel loop" default:"10" hidden:"true"`
+	Chdir                string   `usage:"Change directory to this path before running the nanobot" default:"." short:"C"`
+	State                string   `usage:"Path to the state file" default:"./nanobot.db"`
+	ConfigPath           []string `usage:"Configuration file, directory, URL, or repo ref. Repeat to merge multiple configs; later entries override earlier ones" name:"config" short:"c"`
+	ExcludeBuiltInAgents bool     `usage:"Exclude built-in agents from the configuration"`
 
 	otel *telemetry.Otel
 }
@@ -170,16 +161,19 @@ func (n *Nanobot) llmConfig() llm.Config {
 	return llm.Config{
 		DefaultModel:     n.DefaultModel,
 		DefaultMiniModel: n.DefaultMiniModel,
-		Responses: responses.Config{
-			APIKey:            n.OpenAIAPIKey,
-			BaseURL:           n.OpenAIBaseURL,
-			Headers:           n.OpenAIHeaders,
-			ChatCompletionAPI: n.OpenAIChatCompletionAPI,
-		},
-		Anthropic: anthropic.Config{
-			APIKey:  n.AnthropicAPIKey,
-			BaseURL: n.AnthropicBaseURL,
-			Headers: n.AnthropicHeaders,
+		// Built-in default providers for backwards compatibility.
+		// These are overridden by any providers defined in the YAML config.
+		LLMProviders: map[string]llm.LLMProviderConfig{
+			"openai": {
+				Dialect: types.DialectOpenAIResponses,
+				APIKey:  "${OPENAI_API_KEY}",
+				BaseURL: "${OPENAI_BASE_URL}",
+			},
+			"anthropic": {
+				Dialect: types.DialectAnthropicMessages,
+				APIKey:  "${ANTHROPIC_API_KEY}",
+				BaseURL: "${ANTHROPIC_BASE_URL}",
+			},
 		},
 	}
 }
@@ -230,13 +224,43 @@ func (n *Nanobot) loadEnv() (map[string]string, error) {
 	return env, nil
 }
 
-func (n *Nanobot) ReadConfig(ctx context.Context, cfgPath string, includeDefaultAgents bool, opts ...runtime.Options) (*types.Config, error) {
-	cfg, _, err := config.Load(ctx, cfgPath, includeDefaultAgents, complete.Complete(opts...).Profiles...)
+func (n *Nanobot) ReadConfig(ctx context.Context, cfgPaths []string, includeDefaultAgents bool, opts ...runtime.Options) (*types.Config, error) {
+	cfg, _, err := config.LoadMany(ctx, cfgPaths, includeDefaultAgents, complete.Complete(opts...).Profiles...)
 	return cfg, err
 }
 
-func (n *Nanobot) GetRuntime(opts ...runtime.Options) (*runtime.Runtime, error) {
-	return runtime.NewRuntime(n.llmConfig(), opts...)
+func (n *Nanobot) ConfigPaths() []string {
+	if len(n.ConfigPath) == 0 {
+		return []string{config.DefaultConfigPath}
+	}
+	return n.ConfigPath
+}
+
+func (n *Nanobot) RuntimeConfigDir() string {
+	return runtimeConfigDir(n.ConfigPath)
+}
+
+func runtimeConfigDir(configPaths []string) string {
+	configPath := config.DefaultConfigPath
+	for _, p := range configPaths {
+		if strings.Contains(configPath, "://") {
+			continue
+		}
+
+		info, err := os.Stat(p)
+		if err == nil {
+			if !info.IsDir() {
+				configPath = filepath.Dir(p)
+			}
+			return configPath
+		}
+	}
+
+	return configPath
+}
+
+func (n *Nanobot) GetRuntime(ctx context.Context, opts ...runtime.Options) (*runtime.Runtime, error) {
+	return runtime.NewRuntime(ctx, n.llmConfig(), opts...)
 }
 
 func (n *Nanobot) Run(cmd *cobra.Command, _ []string) error {
@@ -251,7 +275,7 @@ type mcpOpts struct {
 	StartUI            bool
 }
 
-func (n *Nanobot) runMCP(ctx context.Context, baseConfig types.ConfigFactory, runt *runtime.Runtime, oauthCallbackHandler mcp.CallbackServer, auditLogCollector *auditlogs.Collector, opts mcpOpts) error {
+func (n *Nanobot) runMCP(ctx context.Context, baseConfig types.ConfigFactory, runt *runtime.Runtime, oauthCallbackHandler mcp.CallbackServer, auditLogCollector *auditlogs.Collector, store *session.Store, opts mcpOpts) error {
 	envProvider := func() (map[string]string, error) {
 		return n.loadEnv()
 	}
@@ -281,10 +305,7 @@ func (n *Nanobot) runMCP(ctx context.Context, baseConfig types.ConfigFactory, ru
 		return fmt.Errorf("https:// is not supported, use http:// instead")
 	}
 
-	sessionManager, err := session.NewManager(n.DSN())
-	if err != nil {
-		return err
-	}
+	sessionManager := session.NewManager(store)
 
 	var mcpServer mcp.MessageHandler = server.NewServer(runt, config, sessionManager, server.Options{
 		ForceFetchToolList: opts.ForceFetchToolList,

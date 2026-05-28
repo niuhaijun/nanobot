@@ -4,15 +4,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"slices"
 
-	"github.com/nanobot-ai/nanobot/pkg/agents"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/sampling"
-	"github.com/nanobot-ai/nanobot/pkg/sessiondata"
-	"github.com/nanobot-ai/nanobot/pkg/tools"
-	"github.com/nanobot-ai/nanobot/pkg/types"
-	"github.com/nanobot-ai/nanobot/pkg/version"
+	"github.com/obot-platform/nanobot/pkg/agents"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/sampling"
+	"github.com/obot-platform/nanobot/pkg/sessiondata"
+	"github.com/obot-platform/nanobot/pkg/tools"
+	"github.com/obot-platform/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/version"
 )
 
 type Server struct {
@@ -26,6 +27,7 @@ type Server struct {
 
 type Caller interface {
 	Call(ctx context.Context, server, tool string, args any, opts ...tools.CallOptions) (ret *types.CallResult, err error)
+	BuildToolMappings(ctx context.Context, toolList []string, opts ...types.BuildToolMappingsOptions) (types.ToolMappings, error)
 	GetClient(ctx context.Context, name string) (*mcp.Client, error)
 	GetPrompt(ctx context.Context, target, prompt string, args map[string]string) (*mcp.GetPromptResult, error)
 }
@@ -55,9 +57,6 @@ func (s *Server) withConfig(ctx context.Context) (context.Context, error) {
 
 func (s *Server) OnMessage(ctx context.Context, msg mcp.Message) {
 	switch msg.Method {
-	case "initialize":
-		mcp.Invoke(ctx, msg, s.initialize)
-		return
 	case "notifications/initialized":
 		// nothing to do
 		return
@@ -88,6 +87,9 @@ func (s *Server) OnMessage(ctx context.Context, msg mcp.Message) {
 	}
 
 	switch msg.Method {
+	case "initialize":
+		mcp.Invoke(ctx, msg, s.initialize)
+		return
 	case "resources/list":
 		mcp.Invoke(ctx, msg, s.resourcesList)
 	case "resources/templates/list":
@@ -111,7 +113,7 @@ func messagesToResourceContents(messages []types.Message) ([]mcp.ResourceContent
 		contents = append(contents, mcp.ResourceContent{
 			URI:      fmt.Sprintf(types.MessageURI, msg.ID),
 			MIMEType: types.MessageMimeType,
-			Text:     &[]string{string(data)}[0],
+			Text:     new(string(data)),
 		})
 	}
 	return contents, nil
@@ -141,11 +143,13 @@ func (s *Server) readProgress(ctx context.Context) (ret []mcp.ResourceContent, _
 	}
 
 	data, err := json.Marshal(types.AsyncCallResult{
-		IsError:       callResult.IsError,
-		Content:       callResult.Content,
-		InProgress:    progress.HasMore,
-		ToolName:      types.AgentTool + callResult.Agent,
-		ProgressToken: progress.ProgressToken,
+		Meta:             callResult.Meta,
+		IsError:          callResult.IsError,
+		Content:          callResult.Content,
+		InProgress:       progress.HasMore,
+		ToolName:         types.AgentTool + callResult.Agent,
+		ProgressToken:    progress.ProgressToken,
+		InputReplacement: progress.InputReplacement,
 	})
 	if err != nil {
 		return nil, err
@@ -155,7 +159,7 @@ func (s *Server) readProgress(ctx context.Context) (ret []mcp.ResourceContent, _
 		{
 			URI:      types.ProgressURI,
 			MIMEType: types.ToolResultMimeType,
-			Text:     &[]string{string(data)}[0],
+			Text:     new(string(data)),
 		},
 	}
 	for _, content := range callResult.Content {
@@ -188,7 +192,7 @@ func (s *Server) readPendingElicitation(ctx context.Context) ([]mcp.ResourceCont
 		{
 			URI:      types.ElicitationURI,
 			MIMEType: types.ElicitationMimeType,
-			Text:     &[]string{string(data)}[0],
+			Text:     new(string(data)),
 		},
 	}, nil
 }
@@ -334,7 +338,24 @@ func (s *Server) resourcesList(ctx context.Context, _ mcp.Message, _ mcp.ListRes
 	return result, nil
 }
 
-func (s *Server) initialize(_ context.Context, _ mcp.Message, params mcp.InitializeRequest) (*mcp.InitializeResult, error) {
+func (s *Server) initialize(ctx context.Context, _ mcp.Message, params mcp.InitializeRequest) (*mcp.InitializeResult, error) {
+	config := types.ConfigFromContext(ctx)
+	agent := config.Agents[s.agentName]
+	servers := slices.Concat(agent.Agents, agent.MCPServers, agent.Prompts, agent.Resources, agent.Tools)
+	go func(servers []string) {
+		// Build the tool mappings on initialization in an effort to speed up the first chat message.
+		// Do so in a goroutine to avoid blocking the initialize response.
+		if _, err := s.runtime.BuildToolMappings(types.WithConfig(
+			mcp.WithSession(
+				context.Background(),
+				mcp.SessionFromContext(ctx),
+			),
+			config,
+		), servers); err != nil {
+			slog.Warn("failed to build tool mappings on initialize", "error", err)
+		}
+	}(servers)
+
 	return &mcp.InitializeResult{
 		ProtocolVersion: params.ProtocolVersion,
 		Capabilities: mcp.ServerCapabilities{

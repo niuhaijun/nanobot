@@ -131,30 +131,30 @@ func callResult(object any, err error) (*CallToolResult, error) {
 		return nil, err
 	}
 
-	if _, ok := object.(Content); ok {
+	if c, ok := object.(Content); ok {
 		// If the object is already a Content, we can return it directly
 		return &CallToolResult{
 			IsError: false,
-			Content: []Content{object.(Content)},
+			Content: []Content{c},
 		}, nil
 	}
-	if _, ok := object.(*Content); ok {
+	if c, ok := object.(*Content); ok {
 		// If the object is already a Content, we can return it directly
 		return &CallToolResult{
 			IsError: false,
-			Content: []Content{*(object.(*Content))},
+			Content: []Content{*c},
 		}, nil
 	}
-	if _, ok := object.([]Content); ok {
+	if c, ok := object.([]Content); ok {
 		// If the object is already a slice of Content, we can return it directly
 		return &CallToolResult{
 			IsError: false,
-			Content: object.([]Content),
+			Content: c,
 		}, nil
 	}
-	if _, ok := object.(*CallToolResult); ok {
+	if c, ok := object.(*CallToolResult); ok {
 		// If the object is already a CallToolResult, we can return it directly
-		return object.(*CallToolResult), nil
+		return c, nil
 	}
 	if res, ok := object.(*Resource); ok {
 		return &CallToolResult{
@@ -198,9 +198,14 @@ func callResult(object any, err error) (*CallToolResult, error) {
 		return nil, fmt.Errorf("failed to marshal thread data: %w", err)
 	}
 
+	var structuredContent map[string]any
+	if len(dataBytes) > 0 && dataBytes[0] == '{' {
+		_ = json.Unmarshal(dataBytes, &structuredContent)
+	}
+
 	return &CallToolResult{
 		IsError:           false,
-		StructuredContent: object,
+		StructuredContent: structuredContent,
 		Content: []Content{
 			{
 				Type: "text",

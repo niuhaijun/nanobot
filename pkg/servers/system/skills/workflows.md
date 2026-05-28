@@ -7,6 +7,17 @@ description: Load this skill for ANY request that mentions workflows, including 
 
 Workflows are directories in `workflows/` that codify repeatable processes. Each workflow is a directory containing a `SKILL.md` file (with YAML frontmatter) and any supporting files (scripts, assets, etc.). Each step's output can be referenced by later steps using `{{Step Name}}`.
 
+## Discovering Workflows
+
+There are two places workflows can exist:
+
+1. **Local workflows** — in the `workflows/` directory on the local filesystem. These are workflows the user has created or installed. List the `workflows/` directory to find these.
+2. **Shared/published workflows** — in the remote Obot registry. These are workflows other users have published (publicly or to the organization). Use `searchArtifacts` to find these.
+
+**When the user asks about "shared workflows", "public workflows", workflows from other users, or wants to discover/find/browse available workflows they haven't installed yet, ALWAYS use `searchArtifacts` to search the remote registry.** Do not just list the local `workflows/` directory — that only shows what is already installed locally.
+
+If the user asks to "list all workflows", "show my workflows", "which workflows are installed" or similar without specifying shared/public, find workflows by using the Glob tool (never Bash with find or ls) with pattern `**/SKILL.md` in the `workflows/` directory (do NOT include `workflows/` in both the path and the pattern — that double-nests). If they ask to "list shared workflows" or "find workflows", use `searchArtifacts`.
+
 ## When to Use Workflows
 
 Workflows are for repeatable tasks. If it's a one-time thing, just execute it directly.
@@ -198,7 +209,7 @@ Users may ask to run a workflow at any time — not just immediately after desig
 
 When the user asks you to run a workflow:
 
-1. Load the workflow from `workflows/<name>/SKILL.md`. If you're unsure which workflows are available, list the `workflows/` directory.
+1. Load the workflow from `workflows/<name>/SKILL.md`. If you're unsure which workflows are available, use glob pattern `**/SKILL.md` with path `workflows/` to find them.
 2. Use TodoWrite to create a todo for each workflow step before you begin. This is your execution plan — the user will follow along.
 3. **Present the execution plan to the user.** After creating the todos, present a brief summary of what will be executed and ask the user to confirm before proceeding. For example: "I've planned the following steps: [list steps]. Does this look good to proceed?"
 4. **Wait for user approval.** Do not begin execution until the user confirms.
@@ -272,13 +283,23 @@ To publish a workflow, use the `publishArtifact` tool:
 2. Call `publishArtifact` with the workflow directory name. For example: `publishArtifact({ "workflowName": "code-review" })`.
 3. The tool bundles all files in the directory and uploads to Obot. The `SKILL.md` frontmatter is the source of truth for artifact metadata.
 4. The first publish creates version 1. Subsequent publishes of the same workflow create new versions (v2, v3, etc.).
-5. The tool response will indicate visibility status when relevant — relay that information to the user. Do NOT assume or state the workflow's visibility unless the tool response explicitly mentions it.
+5. Version 1 starts owner-only unless its subjects are updated.
+6. Each later published version defaults to the previous version's sharing settings.
+7. To change who a specific published version is shared with, use `setArtifactSubjects({ "id": "<artifact-id>", "version": <n>, "subjects": [...] })`. If `version` is omitted, the latest version is updated.
+8. Supported subjects are:
+   - `{ "type": "user", "id": "<user-id>" }`
+   - `{ "type": "group", "id": "<group-id>" }`
+   - `{ "type": "selector", "id": "*" }` for all Obot users
+9. An empty `subjects` list makes that version owner-only again.
+10. To find valid user or group IDs before setting subjects, use `listSubjects({ "type": "user" | "group", "query": "..." })`. Leave `query` blank to list everything visible.
 
 ### Searching the Registry
 
-To find published workflows from other users in the **remote Obot registry**, use `searchArtifacts`:
+To find published or shared workflows from other users in the **remote Obot registry**, use `searchArtifacts`:
 - Search by keyword: `searchArtifacts({ "query": "code review", "artifactType": "workflow" })`
-- This is for discovering NEW workflows to install — not for finding workflows already on your local filesystem.
+- List all shared workflows: `searchArtifacts({ "artifactType": "workflow" })` (empty query returns all visible artifacts)
+- This is for discovering shared, public, or published workflows — not for finding workflows already on your local filesystem.
+- **When a user asks about "shared workflows", this is the tool to use.**
 
 ### Installing
 

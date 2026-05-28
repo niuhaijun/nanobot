@@ -11,18 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/nanobot-ai/nanobot/packages/ui"
+	"github.com/obot-platform/nanobot/packages/ui"
 )
 
 var browserProxy = newBrowserProxy()
-
-func getCookieID(req *http.Request) string {
-	cookie, err := req.Cookie("nanobot-session-id")
-	if err == nil {
-		return cookie.Value
-	}
-	return ""
-}
 
 func UISession(next http.Handler, sessionStore *Manager, apiHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
@@ -123,10 +115,6 @@ func UISession(next http.Handler, sessionStore *Manager, apiHandler http.Handler
 			httputil.NewSingleHostReverseProxy(url).ServeHTTP(rw, req)
 		}
 	})
-}
-
-func isSecureRequest(req *http.Request) bool {
-	return req.TLS != nil || req.Header.Get("X-Forwarded-Proto") == "https"
 }
 
 func setNoCacheHeaders(rw http.ResponseWriter) {

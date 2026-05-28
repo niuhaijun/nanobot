@@ -11,8 +11,8 @@ import (
 
 	"log/slog"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 const maxToolResultSize = 50 * 1024 // 50 KiB
@@ -157,10 +157,7 @@ func writeFullResult(content []mcp.Content, filePath string) error {
 
 func buildTruncatedContent(content []mcp.Content, budget int, filePath string) []mcp.Content {
 	suffix := fmt.Sprintf("\n\n[Truncated: full output available at %s]", filePath)
-	remaining := budget - len(suffix)
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(budget-len(suffix), 0)
 
 	var result []mcp.Content
 

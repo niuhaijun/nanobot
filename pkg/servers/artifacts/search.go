@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"net/url"
 
-	obotconfig "github.com/nanobot-ai/nanobot/pkg/servers/obot"
+	obotconfig "github.com/obot-platform/nanobot/pkg/servers/obot"
 )
 
 type searchArtifactsParams struct {
@@ -28,7 +28,6 @@ type searchResultItem struct {
 	ArtifactType  string `json:"artifactType"`
 	AuthorEmail   string `json:"authorEmail,omitempty"`
 	LatestVersion int    `json:"latestVersion"`
-	Visibility    string `json:"visibility"`
 }
 
 func (s *Server) searchArtifacts(ctx context.Context, params searchArtifactsParams) (*searchResult, error) {

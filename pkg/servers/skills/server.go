@@ -4,8 +4,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/version"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/version"
 )
 
 type Server struct {
@@ -78,7 +78,7 @@ func (s *Server) initialize(ctx context.Context, _ mcp.Message, params mcp.Initi
 }
 
 type searchSkillsParams struct {
-	Query  string `json:"query,omitempty"`
+	Query  string `json:"query,omitempty" jsonschema:"Search query to filter skills. Use an empty string to list all available skills."`
 	RepoID string `json:"repoID,omitempty"`
 	Limit  int    `json:"limit,omitempty"`
 }

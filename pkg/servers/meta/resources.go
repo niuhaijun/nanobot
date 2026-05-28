@@ -12,11 +12,11 @@ import (
 
 	"log/slog"
 
-	"github.com/nanobot-ai/nanobot/pkg/fileuri"
-	"github.com/nanobot-ai/nanobot/pkg/fswatch"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/skillformat"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/fileuri"
+	"github.com/obot-platform/nanobot/pkg/fswatch"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/skillformat"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 const sessionsDir = "sessions"
@@ -196,6 +196,9 @@ func (s *Server) listWorkflowResources(ctx context.Context) ([]mcp.Resource, err
 				Name:     filepath.Base(relPath),
 				MimeType: mimeType,
 				Size:     info.Size(),
+				Annotations: &mcp.Annotations{
+					LastModified: info.ModTime(),
+				},
 			})
 			return nil
 		})
@@ -457,9 +460,7 @@ func (s *Server) readFileResource(ctx context.Context, uri string) (*mcp.ReadRes
 		MIMEType: mimeType,
 	}
 
-	if _, isImage := types.ImageMimeTypes[mimeType]; isImage {
-		rc.Blob = new(base64.StdEncoding.EncodeToString(content))
-	} else if _, isPDF := types.PDFMimeTypes[mimeType]; isPDF {
+	if types.ResourceContentUseBlob(mimeType, content) {
 		rc.Blob = new(base64.StdEncoding.EncodeToString(content))
 	} else {
 		rc.Text = new(string(content))

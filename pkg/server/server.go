@@ -12,14 +12,14 @@ import (
 	"slices"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/complete"
-	"github.com/nanobot-ai/nanobot/pkg/expr"
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
-	"github.com/nanobot-ai/nanobot/pkg/runtime"
-	"github.com/nanobot-ai/nanobot/pkg/session"
-	"github.com/nanobot-ai/nanobot/pkg/sessiondata"
-	"github.com/nanobot-ai/nanobot/pkg/tools"
-	"github.com/nanobot-ai/nanobot/pkg/types"
+	"github.com/obot-platform/nanobot/pkg/complete"
+	"github.com/obot-platform/nanobot/pkg/expr"
+	"github.com/obot-platform/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/runtime"
+	"github.com/obot-platform/nanobot/pkg/session"
+	"github.com/obot-platform/nanobot/pkg/sessiondata"
+	"github.com/obot-platform/nanobot/pkg/tools"
+	"github.com/obot-platform/nanobot/pkg/types"
 )
 
 type Server struct {
@@ -95,7 +95,7 @@ func (s *Server) handleResourcesUnsubscribe(ctx context.Context, msg mcp.Message
 	if err != nil {
 		return err
 	}
-	return msg.Reply(ctx, map[string]any{})
+	return msg.Reply(ctx, mcp.UnsubscribeResult{})
 }
 
 func (s *Server) handleResourcesSubscribe(ctx context.Context, msg mcp.Message, payload mcp.SubscribeRequest) error {
@@ -103,7 +103,7 @@ func (s *Server) handleResourcesSubscribe(ctx context.Context, msg mcp.Message, 
 	if err != nil {
 		return err
 	}
-	return msg.Reply(ctx, map[string]any{})
+	return msg.Reply(ctx, mcp.SubscribeResult{})
 }
 
 func (s *Server) handleListResourceTemplates(ctx context.Context, msg mcp.Message, _ mcp.ListResourceTemplatesRequest) error {
@@ -242,6 +242,7 @@ func (s *Server) handleCallTool(ctx context.Context, msg mcp.Message, payload mc
 		"is_error", result.IsError,
 		"duration_ms", time.Since(start).Milliseconds())
 	mcpResult := mcp.CallToolResult{
+		Meta:              result.Meta,
 		StructuredContent: result.StructuredContent,
 		IsError:           result.IsError,
 		Content:           result.Content,

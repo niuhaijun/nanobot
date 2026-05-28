@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/mcp"
 )
 
 const (
@@ -85,6 +85,7 @@ type Chat struct {
 	Title        string    `json:"title"`
 	Created      time.Time `json:"created"`
 	ReadOnly     bool      `json:"readonly,omitempty"`
+	TaskURI      string    `json:"taskURI,omitempty"`
 	WorkflowURIs []string  `json:"workflowURIs,omitempty"`
 }
 

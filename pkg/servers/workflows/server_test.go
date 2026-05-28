@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nanobot-ai/nanobot/pkg/mcp"
+	"github.com/obot-platform/nanobot/pkg/mcp"
 )
 
 // testdataDir returns the absolute path to the testdata directory
@@ -125,6 +125,17 @@ func TestResourcesList(t *testing.T) {
 	}
 	if noDescWf.Meta != nil {
 		t.Errorf("no-description Meta should be nil, got %v", noDescWf.Meta)
+	}
+
+	supportingFile := resourceMap["script.py"]
+	if supportingFile.URI != "file:///workflows/in-progress/script.py" {
+		t.Errorf("supporting file URI = %q, want 'file:///workflows/in-progress/script.py'", supportingFile.URI)
+	}
+	if supportingFile.Annotations == nil {
+		t.Fatal("supporting file Annotations should not be nil")
+	}
+	if supportingFile.Annotations.LastModified.IsZero() {
+		t.Error("supporting file LastModified should not be zero")
 	}
 }
 

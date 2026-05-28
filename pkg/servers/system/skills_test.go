@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/nanobot-ai/nanobot/pkg/skillformat"
+	"github.com/obot-platform/nanobot/pkg/skillformat"
 )
 
 // testdataDir returns the absolute path to the testdata directory
@@ -42,7 +42,7 @@ func writeDirectorySkill(t *testing.T, configDir, name, description, body string
 }
 
 func TestListSkills(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	result, err := server.listSkills(ctx, struct{}{})
@@ -74,7 +74,7 @@ func TestListSkills(t *testing.T) {
 	}
 
 	// Check for expected skills
-	expectedSkills := []string{"python-scripts", "workflows"}
+	expectedSkills := []string{"python-scripts", "scheduled-tasks", "workflows"}
 	for _, expected := range expectedSkills {
 		if !skillNames[expected] {
 			t.Errorf("should have %s skill", expected)
@@ -83,7 +83,7 @@ func TestListSkills(t *testing.T) {
 }
 
 func TestListSkillsWithUserSkills(t *testing.T) {
-	server := NewServer(testdataDir(t, "with-user-skills"))
+	server := NewServer("", testdataDir(t, "with-user-skills"))
 	ctx := context.Background()
 
 	result, err := server.listSkills(ctx, struct{}{})
@@ -120,7 +120,7 @@ func TestListSkillsWithUserSkills(t *testing.T) {
 }
 
 func TestListSkillsUserOverridesBuiltin(t *testing.T) {
-	server := NewServer(testdataDir(t, "with-override"))
+	server := NewServer("", testdataDir(t, "with-override"))
 	ctx := context.Background()
 
 	result, err := server.listSkills(ctx, struct{}{})
@@ -157,7 +157,7 @@ func TestListSkillsUserOverridesBuiltin(t *testing.T) {
 
 func TestListSkillsMissingDirectory(t *testing.T) {
 	// Use a non-existent directory - should not error
-	server := NewServer("/non/existent/directory")
+	server := NewServer("", "/non/existent/directory")
 	ctx := context.Background()
 
 	result, err := server.listSkills(ctx, struct{}{})
@@ -176,7 +176,7 @@ func TestListSkillsMissingDirectory(t *testing.T) {
 
 func TestListSkillsEmptyDirectory(t *testing.T) {
 	// Use a directory with an empty skills subdirectory
-	server := NewServer(testdataDir(t, "empty-skills"))
+	server := NewServer("", testdataDir(t, "empty-skills"))
 	ctx := context.Background()
 
 	result, err := server.listSkills(ctx, struct{}{})
@@ -194,7 +194,7 @@ func TestListSkillsEmptyDirectory(t *testing.T) {
 }
 
 func TestGetSkill(t *testing.T) {
-	server := NewServer("")
+	server := NewServer("", "")
 	ctx := context.Background()
 
 	tests := []struct {
@@ -214,6 +214,12 @@ func TestGetSkill(t *testing.T) {
 			skillName:     "python-scripts.md",
 			expectError:   false,
 			shouldContain: "name: python-scripts",
+		},
+		{
+			name:          "get scheduled tasks skill",
+			skillName:     "scheduled-tasks",
+			expectError:   false,
+			shouldContain: "name: scheduled-tasks",
 		},
 		{
 			name:          "get workflows skill",
@@ -261,7 +267,7 @@ func TestGetSkill(t *testing.T) {
 }
 
 func TestGetSkillUserSkill(t *testing.T) {
-	server := NewServer(testdataDir(t, "with-user-skills"))
+	server := NewServer("", testdataDir(t, "with-user-skills"))
 	ctx := context.Background()
 
 	content, err := server.getSkill(ctx, GetSkillParams{Name: "my-custom-skill"})
@@ -277,7 +283,7 @@ func TestGetSkillUserSkill(t *testing.T) {
 }
 
 func TestGetSkillUserOverridesBuiltin(t *testing.T) {
-	server := NewServer(testdataDir(t, "with-override"))
+	server := NewServer("", testdataDir(t, "with-override"))
 	ctx := context.Background()
 
 	content, err := server.getSkill(ctx, GetSkillParams{Name: "workflows"})
@@ -297,7 +303,7 @@ func TestGetSkillUserOverridesBuiltin(t *testing.T) {
 
 func TestGetSkillFallsBackToBuiltin(t *testing.T) {
 	// Use the with-user-skills directory which doesn't have a workflows.md file
-	server := NewServer(testdataDir(t, "with-user-skills"))
+	server := NewServer("", testdataDir(t, "with-user-skills"))
 	ctx := context.Background()
 
 	content, err := server.getSkill(ctx, GetSkillParams{Name: "workflows"})
@@ -313,11 +319,35 @@ func TestGetSkillFallsBackToBuiltin(t *testing.T) {
 	}
 }
 
+func TestGetScheduledTasksSkillIncludesTimezoneAndCronGuidance(t *testing.T) {
+	server := NewServer("", "")
+	ctx := context.Background()
+
+	content, err := server.getSkill(ctx, GetSkillParams{Name: "scheduled-tasks"})
+	if err != nil {
+		t.Fatalf("getSkill() failed: %v", err)
+	}
+
+	expectedSnippets := []string{
+		"If you do not know the user's timezone, collect it before creating the task.",
+		"Unless the user asks for a different timezone, new scheduled tasks should use the user's current timezone.",
+		"`45 2 * * *`",
+		"`20 23 * * 1,2,3,4`",
+		"`45 2 22,24 * *`",
+		"`45 2 26 3 *` with expiration `2026-03-26`",
+	}
+	for _, snippet := range expectedSnippets {
+		if !strings.Contains(content, snippet) {
+			t.Errorf("content should contain %q", snippet)
+		}
+	}
+}
+
 func TestListSkillsIncludesDirectorySkill(t *testing.T) {
 	configDir := t.TempDir()
 	writeDirectorySkill(t, configDir, "dir-skill", "Directory skill description", "\n# Directory Skill\n")
 
-	server := NewServer(configDir)
+	server := NewServer("", configDir)
 	result, err := server.listSkills(context.Background(), struct{}{})
 	if err != nil {
 		t.Fatalf("listSkills() failed: %v", err)
@@ -357,7 +387,7 @@ description: Flat skill description
 	}
 	writeDirectorySkill(t, configDir, "conflict", "Directory skill description", "\n# Directory\n")
 
-	server := NewServer(configDir)
+	server := NewServer("", configDir)
 	result, err := server.listSkills(context.Background(), struct{}{})
 	if err != nil {
 		t.Fatalf("listSkills() failed: %v", err)
@@ -396,7 +426,7 @@ func TestInvalidDirectorySkillFailsClosed(t *testing.T) {
 		t.Fatalf("failed to write invalid SKILL.md: %v", err)
 	}
 
-	server := NewServer(configDir)
+	server := NewServer("", configDir)
 	result, err := server.listSkills(context.Background(), struct{}{})
 	if err != nil {
 		t.Fatalf("listSkills() failed: %v", err)
